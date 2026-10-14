@@ -1,10 +1,14 @@
 """Pokédex AI Classifier — interfaz Streamlit para el Random Forest de Legendarios."""
 
+import html
+
 import joblib
+import numpy as np
 import pandas as pd
 import streamlit as st
 
 MODEL_PATH = "modelo.joblib"
+CSV_PATH = "pokemon.csv"
 FEATURES = ["HP", "Attack", "Defense", "Sp. Atk", "Sp. Def", "Speed", "Generation"]
 STATS = ["HP", "Attack", "Defense", "Sp. Atk", "Sp. Def", "Speed"]
 
@@ -18,6 +22,29 @@ def cargar_modelo():
 
 modelo = cargar_modelo()
 IDX_LEGENDARIO = list(modelo.classes_).index(True)
+
+
+@st.cache_resource
+def cargar_pokedex():
+    """Dataset de referencia y la hoja en la que cae cada Pokémon en cada árbol."""
+    df = pd.read_csv(CSV_PATH).dropna(subset=["Name"]).reset_index(drop=True)
+    hojas = modelo.apply(df[FEATURES])  # shape (n_pokemon, n_arboles)
+    return df, hojas
+
+
+def pokemon_similares(entrada, n=5):
+    """Proximidad del Random Forest: % de árboles en que comparten hoja."""
+    df, hojas = cargar_pokedex()
+    hojas_entrada = modelo.apply(entrada)[0]
+    proximidad = (hojas == hojas_entrada).mean(axis=1)
+    # Desempate: a igual proximidad, el de estadísticas más cercanas
+    distancia = ((df[STATS].to_numpy() - entrada[STATS].to_numpy()) ** 2).sum(axis=1)
+    top = np.lexsort((distancia, -proximidad))[:n]
+    res = df.loc[top, ["Name", "Legendary"] + STATS].copy()
+    res["Total"] = res[STATS].sum(axis=1)
+    res["Proximidad"] = proximidad[top]
+    return res
+
 
 # ---------------------------------------------------------------------------
 # Estilos CSS personalizados (Pokédex / dashboard gaming oscuro)
@@ -153,6 +180,23 @@ st.markdown(
     .badge-600   { background: rgba(160, 110, 255, .14); border: 1px solid #a06eff; color: #c9aaff; }
     .badge-note  { color: var(--muted); font-size: .8rem; margin-top: .5rem; }
 
+    /* Pokémon más parecidos */
+    .sim-row {
+        display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(40px, 1fr) 42px;
+        align-items: center; gap: .7rem; padding: .45rem .7rem;
+        margin: .3rem 0; border-radius: 10px; background: var(--card-2);
+        border-left: 3px solid #3a4a66; font-size: .9rem;
+    }
+    .sim-legend { border-left-color: var(--gold); }
+    .sim-name  { display: block; font-weight: 700; overflow-wrap: anywhere; line-height: 1.2; }
+    .sim-meta  { display: block; font-size: .75rem; color: var(--muted); }
+    .sim-tag   { color: #9fb3d1; }
+    .sim-legend .sim-tag { color: var(--gold); }
+    .sim-bar   { height: 8px; background: #0f121b; border-radius: 999px; overflow: hidden; }
+    .sim-bar div { height: 100%; background: linear-gradient(90deg, #2d5f9a, var(--blue)); }
+    .sim-legend .sim-bar div { background: linear-gradient(90deg, var(--gold-soft), var(--gold)); }
+    .sim-pct   { width: 40px; text-align: right; font-weight: 800; }
+
     /* Resumen de stats */
     .stat-row { display: flex; align-items: center; gap: .6rem; margin: .25rem 0; font-size: .9rem; }
     .stat-row .name { width: 70px; color: var(--muted); }
@@ -283,6 +327,28 @@ with tab_ind:
                 unsafe_allow_html=True,
             )
             st.progress(prob_leg, text=f"Probabilidad de ser Legendario: {prob_leg:.1%}")
+
+            similares = pokemon_similares(entrada)
+            filas_sim = "".join(
+                f'<div class="sim-row sim-{"legend" if r.Legendary else "common"}">'
+                f'<span><span class="sim-name">{html.escape(r.Name)}</span>'
+                f'<span class="sim-meta"><span class="sim-tag">{"Legendario" if r.Legendary else "Común"}</span>'
+                f" · Total {r.Total}</span></span>"
+                f'<span class="sim-bar"><div style="width:{r.Proximidad * 100:.0f}%"></div></span>'
+                f'<span class="sim-pct">{r.Proximidad:.0%}</span></div>'
+                for r in similares.itertuples()
+            )
+            st.markdown(
+                f"""
+                <div class="card" style="margin-top:1rem">
+                    <div class="card-title">Pokémon más parecidos (proximidad del bosque)</div>
+                    {filas_sim}
+                    <div class="badge-note">% de los {modelo.n_estimators} árboles en los que
+                    comparte hoja con cada Pokémon del dataset.</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
         else:
             st.markdown(
                 '<div class="card" style="text-align:center;color:#8a91a8">'

@@ -124,6 +124,25 @@ La zona de duda no se llama "pseudo-legendario" a propósito: en el dataset, de 
 | Articuno | Legendario | Zona de duda | — |
 | Dragonite | Común | Alta | 💎 |
 
+#### Pokémon más parecidos (proximidad del Random Forest)
+Además del veredicto, la app muestra los 5 Pokémon del dataset que el bosque considera más parecidos. No se usa un modelo aparte (como KNN), sino la **proximidad de Breiman**, propia del Random Forest:
+
+```python
+hojas = modelo.apply(df[FEATURES])          # hoja en la que cae cada Pokémon en cada árbol
+hojas_entrada = modelo.apply(entrada)[0]    # hojas del Pokémon introducido
+proximidad = (hojas == hojas_entrada).mean(axis=1)
+```
+
+Dos Pokémon son "vecinos" si caen en la **misma hoja** en muchos de los 100 árboles: el bosque los trata igual. Un 54 % significa que comparten hoja en 54 árboles. Las hojas del dataset se calculan una sola vez (`@st.cache_resource`), y a igual proximidad se desempata por distancia euclídea entre estadísticas.
+
+| Entrada | Más parecidos según el bosque |
+|---|---|
+| Dragonite | Gyarados 54 %, Tyranitar 47 %, Swampert 39 % |
+| Articuno | Suicune 43 %, Cresselia 23 %, Lugia 20 % |
+| Mewtwo | Mega Mewtwo X 61 %, Rayquaza 50 %, Mega Mewtwo Y 49 % |
+
+Esto ayuda a interpretar la zona de duda: si los vecinos mezclan legendarios y comunes, se ve por qué los árboles están divididos. Con Pokémon débiles es habitual ver varios al 100 %, porque las hojas de la zona "común" agrupan a muchos Pokémon a la vez.
+
 ### Pestaña b) Inferencia masiva (CSV)
 `st.file_uploader` recibe un CSV; se comprueba que estén las 7 columnas necesarias, se convierten a numérico (las filas no válidas se marcan en lugar de romper la app) y se añaden las columnas `Predicción` y `Prob. Legendario`. El resultado se muestra con `st.dataframe` y se puede descargar.
 
